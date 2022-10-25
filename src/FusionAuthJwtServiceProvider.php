@@ -3,12 +3,14 @@
 namespace DaniloPolani\FusionAuthJwt;
 
 use DaniloPolani\FusionAuthJwt\Http\Middleware\CheckRole;
+use DaniloPolani\FusionAuthJwt\FusionAuthequestGuard;
 use Illuminate\Auth\RequestGuard;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\ServiceProvider;
+use \DaniloPolani\FusionAuthJwt\DefaultMixedGuard;
 
 class FusionAuthJwtServiceProvider extends ServiceProvider
 {
@@ -27,18 +29,15 @@ class FusionAuthJwtServiceProvider extends ServiceProvider
 
         Auth::extend(
             'fusionauth',
-            fn (Application $app, string $name, array $config) => new RequestGuard(
+            fn (Application $app, string $name, array $config) => new DefaultMixedGuard(
                 fn (Request $request, FusionAuthJwtUserProvider $provider) => $provider->retrieveByCredentials([
-                    'jwt' => $request->bearerToken(),
+                    'jwt' => $request->bearerToken() ?? $request->input('token'),
+                    'refreshToken' => $request->input('refreshToken')
                 ]),
                 $app['request'],
                 $app['auth']->createUserProvider($config['provider'])
             )
         );
-
-        /** @var Router $router */
-        $router = $this->app->make(Router::class);
-        $router->aliasMiddleware('fusionauth.role', CheckRole::class);
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -46,4 +45,5 @@ class FusionAuthJwtServiceProvider extends ServiceProvider
             ], 'fusionauth-jwt-config');
         }
     }
+
 }

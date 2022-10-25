@@ -2,6 +2,8 @@
 
 namespace DaniloPolani\FusionAuthJwt;
 
+use App\User;
+use CoreGateway\User\UserRepository;
 use Illuminate\Contracts\Auth\Authenticatable;
 
 /**
@@ -21,6 +23,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 class FusionAuthJwtUser implements Authenticatable
 {
     private array $userInfo;
+    private $localUserInfo;
 
     /**
      * FusionAuthUser constructor.
@@ -30,6 +33,10 @@ class FusionAuthJwtUser implements Authenticatable
     public function __construct(array $userInfo)
     {
         $this->userInfo = $userInfo;
+        // Get corresponding coreauth user
+        $coregatewayUser = User::where(['username' => $userInfo['username']])->first();
+        // This will throw an exception if the user was NOT found
+        $this->localUserInfo = $coregatewayUser ?? false;
     }
 
     /**
@@ -37,7 +44,7 @@ class FusionAuthJwtUser implements Authenticatable
      */
     public function getAuthIdentifierName()
     {
-        return $this->userInfo['sub'];
+        return $this->userInfo['username'];
     }
 
     /**
@@ -45,7 +52,7 @@ class FusionAuthJwtUser implements Authenticatable
      */
     public function getAuthIdentifier()
     {
-        return $this->userInfo['sub'];
+        return $this->localUserInfo->id;
     }
 
     /**
@@ -90,6 +97,10 @@ class FusionAuthJwtUser implements Authenticatable
         return $this->userInfo;
     }
 
+    public function getLocalUserInfo() {
+        return $this->localUserInfo;
+    }
+
     /**
      * Add a generic getter to get all the properties of the userInfo.
      *
@@ -98,7 +109,7 @@ class FusionAuthJwtUser implements Authenticatable
      */
     public function __get($name)
     {
-        return $this->userInfo[$name] ?? null;
+        return $this->userInfo[$name] ?? $this->localUserInfo->{$name} ?? null;
     }
 
     /**
@@ -108,6 +119,6 @@ class FusionAuthJwtUser implements Authenticatable
      */
     public function __toString()
     {
-        return json_encode($this->userInfo);
+        return json_encode([$this->userInfo, 'localUser' => $this->localUserInfo]);
     }
 }

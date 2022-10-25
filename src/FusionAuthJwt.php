@@ -5,6 +5,7 @@ namespace DaniloPolani\FusionAuthJwt;
 use DaniloPolani\FusionAuthJwt\Exceptions\InvalidTokenAlgorithmException;
 use DaniloPolani\FusionAuthJwt\Exceptions\InvalidTokenException;
 use Firebase\JWT\JWT;
+use FusionAuth\FusionAuthClient;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
@@ -22,9 +23,13 @@ class FusionAuthJwt
 
     public const ALGO_HS256 = 'HS256';
 
+    private $fusionAuthClient = false;
+
     /**
      * Decode a JWT.
      *
+     * @param string $jwt
+     * @return array
      * @throws InvalidTokenAlgorithmException             Provided algorithm is not supported
      * @throws InvalidTokenException                      Decoded JWT iss or aud are invalid
      *
@@ -35,8 +40,6 @@ class FusionAuthJwt
      * @throws \Firebase\JWT\BeforeValidException         Provided JWT is trying to be used before it's been created as defined by 'iat'
      * @throws \Firebase\JWT\ExpiredException             Provided JWT has since expired, as defined by the 'exp' claim
      *
-     * @param  string $jwt
-     * @return array
      */
     public static function decode(string $jwt): array
     {
@@ -46,24 +49,48 @@ class FusionAuthJwt
             throw new InvalidTokenAlgorithmException('Unsupported token signing algorithm configured. Must be either RS256 or HS256.');
         }
 
-        if ($supportedAlgs[0] === self::ALGO_RS256) {
-            $data = JWT::decode($jwt, self::fetchPublicKeys(), $supportedAlgs);
+        $client = \App::make(\FusionAuth\FusionAuthClient::class);
+        if (!$client) {
+            return false;
         } else {
-            $data = JWT::decode($jwt, Config::get('fusionauth.client_secret'), $supportedAlgs);
+            /**
+             * @var  FusionAuthClient $client
+             */
+            $validatedToken = $client->validateJWT($jwt);
+            if ($validatedToken->wasSuccessful()) {
+                $data = $client->retrieveUserUsingJWT($jwt);
+                if ($data->wasSuccessful()) {
+                    $data = $data->successResponse->user;
+                } else {
+                    // try to get the user, from the token
+                    $token = Token::firstWhere([
+                        'id' => $validatedToken->successResponse->jwt->jti,
+                        'revoked' => false
+                    ]);
+
+                    if ($token) {
+                        $data = $token->user->toArray();
+                    } else {
+                        throw new InvalidTokenException('Token can not be authenticated against server.');
+                    }
+                }
+            } else {
+                //should we try to auto-renew the token here?, or we let the front end handle it ?
+                throw new InvalidTokenException('Token is invalid', 500);
+            }
+
         }
 
-        self::validate($data);
-
-        return (array) $data;
+        return ['user' => (array)$data, 'token' => $validatedToken->successResponse->jwt];
     }
 
     /**
      * Validate a token by its aud and iss.
      *
+     * @param object $token
+     * @return void
      * @throws InvalidTokenException
      *
-     * @param  object $token
-     * @return void
      */
     public static function validate(object $token): void
     {
@@ -83,19 +110,5 @@ class FusionAuthJwt
         }
     }
 
-    /**
-     * Fetch public keys generated from JWKS.
-     *
-     * @return array
-     */
-    protected static function fetchPublicKeys(): array
-    {
-        return Cache::remember(
-            'fusionauth.public_keys',
-            self::JWKS_CACHE_TTL,
-            fn () => Http::get('https://' . Config::get('fusionauth.domain') . '/api/jwt/public-key')
-                ->throw()
-                ->json('publicKeys', [])
-        );
-    }
+
 }
